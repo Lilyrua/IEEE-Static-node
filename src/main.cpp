@@ -1,10 +1,9 @@
-/* * HELTEC V3 LoRaWAN - MASTER DEPLOYMENT MODE (SOLAR + BAT GAUGE)
- * 1. ส่ง LoRaWAN ทุกๆ 5 นาที (300,000 ms) พร้อมเวลานับถอยหลังบนจอ
- * 2. GPS (UART Toggle) ป้องกัน Buffer Overflow
- * 3. หน้าจอ OLED ปิดอัตโนมัติ 15 วิ (กดปุ่ม PRG เพื่อปลุกจอ)
- * 4. ระดับน้ำ: ใช้ค่า Dummy เพื่อการทดสอบ (เปิดคอมเมนต์เพื่อใช้เซนเซอร์จริงได้เลย)
- * 5. แบตเตอรี่: MAX17043 ผ่าน I2C วงจรที่ 2 (SDA=6, SCL=7)
- * 6. โค้ดรองรับการใช้ Transistor + P-Channel ขับ LED 12V 
+/* * HELTEC V3 LoRaWAN - MASTER DEPLOYMENT MODE
+ * 1. ส่ง LoRaWAN ทุกๆ 5 นาที พร้อมเวลานับถอยหลังบนจอ
+ * 2. GPS (UART Toggle)
+ * 3. หน้าจอ OLED ปิดอัตโนมัติ 15 วิ (ปลุกด้วยปุ่ม PRG)
+ * 4. ระดับน้ำ: Dummy (พร้อมเปิดใช้ RS485 Modbus)
+ * 5. แบตเตอรี่: อ่านผ่าน ADC ขา 2 พร้อมระบบ Median + EMA Filter (นิ่งและเสถียรที่สุด)
  */
 
 #include "LoRaWan_APP.h"
@@ -14,15 +13,8 @@
 #include <Adafruit_SSD1306.h>
 #include <ModbusMaster.h>
 #include <TinyGPSPlus.h>
-#include <SparkFun_MAX1704x_Fuel_Gauge_Arduino_Library.h> // ไลบรารีวัดแบตเตอรี่
-
-// ================= กำหนดขา I2C ที่ 2 สำหรับ MAX17043 =================
-#define EXT_SDA 6 // เปลี่ยนเป็น GPIO 6
-#define EXT_SCL 7 // เปลี่ยนเป็น GPIO 7
-TwoWire WireExt = TwoWire(1); // สร้างช่องทาง I2C แยกไม่ให้กวนจอ OLED
 
 // ================= LoRaWAN Config =================
-// *** อย่าลืมเปลี่ยนให้ตรงกับ TTN (แบบ MSB) ***
 uint8_t devEui[] = {0x70, 0xB3, 0xD5, 0x7E, 0xD8, 0x00, 0x50, 0xCE};
 uint8_t appEui[] = {0x74, 0x64, 0x64, 0x2D, 0x73, 0x74, 0x61, 0x74};
 uint8_t appKey[] = {0x0C, 0x0F, 0xD7, 0x7B, 0x46, 0x76, 0x1F, 0x79, 0x2A, 0xBB, 0xC3, 0xD7, 0x12, 0xDC, 0x8E, 0x60};
@@ -34,7 +26,7 @@ uint32_t devAddr = (uint32_t)0x007e6ae1;
 uint16_t userChannelsMask[6] = {0x00FF, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000};
 LoRaMacRegion_t loraWanRegion = ACTIVE_REGION;
 DeviceClass_t loraWanClass = CLASS_A;
-uint32_t appTxDutyCycle = 30000; // รอบส่ง 5 นาที 
+uint32_t appTxDutyCycle = 30000; // รอบส่ง 5 นาที (300,000 ms)
 
 bool overTheAirActivation = true;
 bool loraWanAdr = true;
@@ -48,8 +40,8 @@ uint32_t currentTxWait = 30000;
 
 // ================= Hardware Config =================
 #define RELAY_PIN 26
-#define RELAY_ON  LOW    
-#define RELAY_OFF HIGH   
+#define RELAY_ON  HIGH    
+#define RELAY_OFF LOW   
 
 #define LED_RED_PIN 4     // LED สีแดง (พร้อมทำงาน)
 #define LED_GREEN_PIN 5   // LED สีเขียว (กำลังส่งข้อมูล)
@@ -58,29 +50,33 @@ uint32_t currentTxWait = 30000;
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 #define OLED_RESET    21 
-#define VEXT_PIN      36  // ขาไฟเลี้ยงจอ
-#define BUTTON_PIN    0   // ปุ่ม PRG บนบอร์ด Heltec
+#define VEXT_PIN      36  
+#define BUTTON_PIN    0   
 
 Adafruit_SSD1306 oled(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 bool isScreenOn = true;
 unsigned long screenTimer = 0;
-const unsigned long SCREEN_TIMEOUT = 15000; // ปิดจอใน 15 วินาที
+const unsigned long SCREEN_TIMEOUT = 15000;
 
 // เซนเซอร์
 #define RS485_RX 48
 #define RS485_TX 47
 #define GPS_RX_PIN 20 
 #define GPS_TX_PIN 19
+#define CUSTOM_BAT_PIN 2  // ขาอ่านแบตเตอรี่
 
 ModbusMaster node;
 TinyGPSPlus gps;
-SFE_MAX1704X lipo(MAX1704X_MAX17043); // ประกาศใช้งาน MAX17043
 
 // Global Variables
 float currentLevel = 0.0;
 float currentLat = 0.0;
 float currentLng = 0.0;
-float batPercentage = 0.0; // เก็บค่าเปอร์เซ็นต์แบต
+int batPercentage = 0; 
+float finalBatteryVoltage = 0.0; // เก็บค่าโวลต์
+float smoothedVoltage = 0.0;     // สำหรับระบบ EMA Filter
+float calibrationOffset = 0.056; // Calibrate แล้ว (เทียบมิเตอร์จริง)
+
 String currentStatus = "Booting..."; 
 int station_id = 1;
 unsigned long lastDisplayUpdate = 0;
@@ -101,14 +97,15 @@ void updateDisplay() {
   oled.setCursor(0, 0);
   oled.print(currentStatus);
 
-  // 2. แถวบนสุด (ตรงกลาง): โชว์แบตเตอรี่ (เช่น B:95%)
-  oled.setCursor(50, 0);
-  oled.print("B:");
-  oled.print(batPercentage, 0); // โชว์ตัวเลขกลมๆ ไม่มีทศนิยม
+  // 2. แถวบนสุด (ตรงกลาง): โชว์แบตเตอรี่และเปอร์เซ็นต์
+  oled.setCursor(45, 0);
+  oled.print(finalBatteryVoltage, 2); 
+  oled.print("V ");
+  oled.print(batPercentage);
   oled.print("%");
 
   // 3. แถวบนสุด (ขวา): เวลานับถอยหลัง
-  oled.setCursor(85, 0); 
+  oled.setCursor(95, 0); 
   if (lastSendTime > 0 && deviceState == DEVICE_STATE_SLEEP) {
     unsigned long elapsed = millis() - lastSendTime;
     unsigned long remain = (currentTxWait > elapsed) ? (currentTxWait - elapsed) / 1000 : 0;
@@ -119,7 +116,7 @@ void updateDisplay() {
     sprintf(timeStr, "%02d:%02d", m, s); 
     oled.print(timeStr);
   } else {
-    oled.print("Wait..");
+    oled.print("Wait");
   }
 
   oled.drawLine(0, 10, 128, 10, SSD1306_WHITE);
@@ -151,9 +148,10 @@ void prepareTxFrame(uint8_t port) {
   int32_t lngInt = (int32_t)(currentLng * 1000000.0f);
   uint32_t latU = (uint32_t)latInt;
   uint32_t lngU = (uint32_t)lngInt;
+  uint16_t vBatInt = (uint16_t)(finalBatteryVoltage * 100); // 4.12V -> 412
 
-  // *** อัปเดตขนาด Payload เป็น 12 Bytes ***
-  appDataSize = 12; 
+  // *** อัปเดตขนาด Payload เป็น 14 Bytes ***
+  appDataSize = 14; 
 
   appData[0] = (uint8_t)station_id;
   appData[1] = (levelInt >> 8) & 0xFF;
@@ -167,8 +165,10 @@ void prepareTxFrame(uint8_t port) {
   appData[9]  = (lngU >> 8) & 0xFF;
   appData[10] = lngU & 0xFF;
   
-  // *** ใส่ค่าเปอร์เซ็นต์แบตเตอรี่ลงใน Byte สุดท้าย ***
-  appData[11] = (uint8_t)batPercentage;
+  // *** ส่ง finalBatteryVoltage และ Bat ***
+  appData[11] = (vBatInt >> 8) & 0xFF;
+  appData[12] = vBatInt & 0xFF;
+  appData[13] = (uint8_t)batPercentage;
 }
 
 void readSensorsQuick() {
@@ -190,11 +190,40 @@ void readSensorsQuick() {
     Serial1.end(); 
     Serial.print(currentLat, 6); Serial.print(", "); Serial.println(currentLng, 6);
 
-    // --- 2. อ่านแบตเตอรี่ (MAX17043) ผ่าน I2C ที่ 2 ---
-    batPercentage = lipo.getSOC();
-    if (batPercentage > 100.0) batPercentage = 100.0; // ป้องกันค่าเกิน 100%
-    if (batPercentage < 0.0) batPercentage = 0.0;     // ป้องกันค่าติดลบ
-    Serial.print("Bat: "); Serial.print(batPercentage); Serial.println("%");
+    // --- 2. อ่านแบตเตอรี่ผ่าน ADC (Median + EMA Filter) ---
+    int samples[31];
+    for (int i = 0; i < 31; i++) {
+      samples[i] = analogReadMilliVolts(CUSTOM_BAT_PIN);
+      delay(2);
+    }
+    for (int i = 0; i < 30; i++) {
+      for (int j = i + 1; j < 31; j++) {
+        if (samples[i] > samples[j]) {
+          int temp = samples[i];
+          samples[i] = samples[j];
+          samples[j] = temp;
+        }
+      }
+    }
+    long sum = 0;
+    for (int i = 10; i <= 20; i++) {
+      sum += samples[i];
+    }
+    float medianAvgMv = sum / 11.0;
+    float currentAvgVoltage = (medianAvgMv / 1000.0) * 6.615;
+    
+    if (smoothedVoltage == 0.0) {
+      smoothedVoltage = currentAvgVoltage; 
+    } else {
+      smoothedVoltage = (currentAvgVoltage * 0.1) + (smoothedVoltage * 0.9);
+    }
+    
+    finalBatteryVoltage = smoothedVoltage + calibrationOffset;
+    batPercentage = map((int)(finalBatteryVoltage * 100), 250, 370, 0, 100);
+    if (batPercentage > 100) batPercentage = 100;
+    if (batPercentage < 0) batPercentage = 0;
+
+    Serial.printf("Bat: %.2fV | %d%%\n", finalBatteryVoltage, batPercentage);
 
     // --- 3. อ่านค่าระดับน้ำ (ปัจจุบันใช้ Dummy) ---
     /* // หากต้องการใช้เซนเซอร์ RS485 จริง ให้ลบ /* และ */
@@ -229,17 +258,8 @@ void setup() {
   pinMode(RELAY_PIN, OUTPUT);
   digitalWrite(RELAY_PIN, RELAY_ON); 
 
-  // --- เริ่มต้น I2C ที่ 1 (สำหรับจอ OLED ภายใน) ---
   Wire.begin(17, 18);
-
-  // --- เริ่มต้น I2C ที่ 2 (สำหรับ MAX17043 ภายนอก ขา 6, 7) ---
-  WireExt.begin(EXT_SDA, EXT_SCL, 100000); 
-  
-  if (lipo.begin(WireExt) == false) { // โยน I2C วงจรที่ 2 ให้ไลบรารีรู้จัก
-    Serial.println("MAX17043 Not Detected on Pin 6 & 7!");
-  } else {
-    Serial.println("MAX17043 OK!");
-  }
+  analogReadResolution(12); // ตั้งความละเอียด ADC
 
   pinMode(OLED_RESET, OUTPUT);
   digitalWrite(OLED_RESET, LOW);
@@ -284,13 +304,25 @@ void loop() {
 
     case DEVICE_STATE_SEND: {
       currentStatus = "Sending...";
+      updateDisplay();
+      
+      // --- เพิ่มจังหวะกระพริบ Pilot Lamp สีเขียว 3 ครั้ง ---
+      for(int i=0; i<3; i++) {
+         digitalWrite(LED_GREEN_PIN, HIGH); // สั่งไฟติด (ถ้าวงจรคุณเป็น Active LOW ให้แก้เป็น LOW)
+         delay(150);
+         digitalWrite(LED_GREEN_PIN, LOW);  // สั่งไฟดับ (ถ้าวงจรคุณเป็น Active LOW ให้แก้เป็น HIGH)
+         delay(150);
+      }
+      
+      // เปิดไฟค้างไว้ระหว่างอ่านเซนเซอร์และส่งข้อมูล
       digitalWrite(LED_GREEN_PIN, HIGH); 
       
       readSensorsQuick(); 
-      updateDisplay();
       prepareTxFrame(appPort);
       LoRaWAN.send();
-      delay(500);
+      
+      // หน่วงเวลาให้เห็นไฟค้างอีกนิดก่อนดับ
+      delay(1000); 
       
       deviceState = DEVICE_STATE_CYCLE;
       break;
