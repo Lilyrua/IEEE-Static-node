@@ -1,9 +1,5 @@
-/* * HELTEC V3 LoRaWAN - MASTER DEPLOYMENT MODE
- * 1. ส่ง LoRaWAN ทุกๆ 5 นาที พร้อมเวลานับถอยหลังบนจอ
- * 2. GPS (UART Toggle)
- * 3. หน้าจอ OLED ปิดอัตโนมัติ 15 วิ (ปลุกด้วยปุ่ม PRG)
- * 4. ระดับน้ำ: Dummy (พร้อมเปิดใช้ RS485 Modbus)
- * 5. แบตเตอรี่: อ่านผ่าน ADC ขา 2 พร้อมระบบ Median + EMA Filter (นิ่งและเสถียรที่สุด)
+/* * HELTEC V3 LoRaWAN - MASTER DEPLOYMENT MODE (FIXED & READY)
+ * [เพิ่มเติม] 7. รองรับ SHT30 (I2C: SDA=6, SCL=7) อ่านอุณหภูมิและความชื้น (แก้บั๊ก SHT31 Constructor แล้ว)
  */
 
 #include "LoRaWan_APP.h"
@@ -13,15 +9,24 @@
 #include <Adafruit_SSD1306.h>
 #include <ModbusMaster.h>
 #include <TinyGPSPlus.h>
+#include <Adafruit_SHT31.h> // ไลบรารีสำหรับ SHT30
 
 // ================= LoRaWAN Config =================
-uint8_t devEui[] = {0x70, 0xB3, 0xD5, 0x7E, 0xD8, 0x00, 0x50, 0xCE};
-uint8_t appEui[] = {0x74, 0x64, 0x64, 0x2D, 0x73, 0x74, 0x61, 0x74};
-uint8_t appKey[] = {0x0C, 0x0F, 0xD7, 0x7B, 0x46, 0x76, 0x1F, 0x79, 0x2A, 0xBB, 0xC3, 0xD7, 0x12, 0xDC, 0x8E, 0x60};
+uint8_t devEui[] = {0x63, 0x0C, 0x36, 0x21, 0x13, 0x33, 0x95, 0xC4};
+uint8_t appEui[] = {0xD3, 0x93, 0xB6, 0xD3, 0xEE, 0xF5, 0xAE, 0xF1}; 
+uint8_t appKey[] = {0x9B, 0xC4, 0x8B, 0x94, 0x1C, 0x48, 0x75, 0x5B, 0xA6, 0xEA, 0x79, 0xD1, 0xFA, 0xB8, 0x53, 0xEF};
 
-uint8_t nwkSKey[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-uint8_t appSKey[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-uint32_t devAddr = (uint32_t)0x007e6ae1;
+// uint8_t nwkSKey[] = {0x59, 0x9E, 0xB8, 0xCB, 0x47, 0x49, 0xE3, 0x40, 0x73, 0x41, 0x9C, 0x77, 0x53, 0x7B, 0x13, 0x1F};
+// uint8_t appSKey[] = {0xF7, 0xA8, 0x8F, 0x89, 0x6C, 0x6B, 0xAA, 0xFB, 0xA5, 0xF2, 0x31, 0x96, 0xCA, 0x7D, 0x05, 0xDC};
+
+// uint8_t devEui[] = {0x70, 0xB3, 0xD5, 0x7E, 0xD8, 0x00, 0x50, 0xCE};
+// uint8_t appEui[] = {0x74, 0x64, 0x64, 0x2D, 0x73, 0x74, 0x61, 0x74}; 
+// uint8_t appKey[] = {0x0C, 0x0F, 0xD7, 0x7B, 0x46, 0x76, 0x1F, 0x79, 0x2A, 0xBB, 0xC3, 0xD7, 0x12, 0xDC, 0x8E, 0x60};
+
+// uint8_t nwkSKey[] = {0x56, 0x43, 0xC6, 0x2F, 0x06, 0xF1, 0xDE, 0x8F, 0x5E, 0x45, 0x29, 0xDF, 0x29, 0xCB, 0x2A, 0xC5};
+// uint8_t appSKey[] = {0x67, 0x79, 0x7F, 0x96, 0x92, 0x93, 0x44, 0x5A, 0x4D, 0x07, 0xD4, 0xA9, 0x0D, 0xB4, 0xFF, 0x41};
+
+uint32_t devAddr = (uint32_t)0x27FA340E; 
 
 uint16_t userChannelsMask[6] = {0x00FF, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000};
 LoRaMacRegion_t loraWanRegion = ACTIVE_REGION;
@@ -43,8 +48,8 @@ uint32_t currentTxWait = 30000;
 #define RELAY_ON  HIGH    
 #define RELAY_OFF LOW   
 
-#define LED_RED_PIN 4     // LED สีแดง (พร้อมทำงาน)
-#define LED_GREEN_PIN 5   // LED สีเขียว (กำลังส่งข้อมูล)
+#define LED_RED_PIN 5     // LED สีแดง (พร้อมทำงาน)
+#define LED_GREEN_PIN 4   // LED สีเขียว (กำลังส่งข้อมูล)
 
 // หน้าจอ OLED และปุ่มกด
 #define SCREEN_WIDTH 128
@@ -61,9 +66,15 @@ const unsigned long SCREEN_TIMEOUT = 15000;
 // เซนเซอร์
 #define RS485_RX 48
 #define RS485_TX 47
-#define GPS_RX_PIN 20 
-#define GPS_TX_PIN 19
+#define GPS_RX_PIN 19 
+#define GPS_TX_PIN 20
 #define CUSTOM_BAT_PIN 2  // ขาอ่านแบตเตอรี่
+
+// SHT30 I2C Config (ใช้ Wire1 เพื่อไม่ให้ชนกับจอ OLED)
+#define SHT30_SDA 6
+#define SHT30_SCL 7
+TwoWire I2CSHT = TwoWire(1); 
+Adafruit_SHT31 sht31 = Adafruit_SHT31(&I2CSHT); // <-- ใส่ &I2CSHT ตรงนี้เพื่อให้เข้ากับไลบรารีล่าสุด
 
 ModbusMaster node;
 TinyGPSPlus gps;
@@ -73,9 +84,13 @@ float currentLevel = 0.0;
 float currentLat = 0.0;
 float currentLng = 0.0;
 int batPercentage = 0; 
-float finalBatteryVoltage = 0.0; // เก็บค่าโวลต์
-float smoothedVoltage = 0.0;     // สำหรับระบบ EMA Filter
-float calibrationOffset = 0.056; // Calibrate แล้ว (เทียบมิเตอร์จริง)
+float finalBatteryVoltage = 0.0; 
+float smoothedVoltage = 0.0;     
+float calibrationOffset = 0; 
+
+// ตัวแปรเก็บค่า SHT30
+float currentTemp = 0.0;
+float currentHum = 0.0;
 
 String currentStatus = "Booting..."; 
 int station_id = 1;
@@ -121,21 +136,28 @@ void updateDisplay() {
 
   oled.drawLine(0, 10, 128, 10, SSD1306_WHITE);
 
-  // 4. แถวกลาง: ค่าระดับน้ำ
-  oled.setCursor(0, 15);
+  // 4. แถวระดับน้ำ
+  oled.setCursor(0, 13);
   oled.print("Lvl:");
-  oled.setCursor(35, 15);
+  oled.setCursor(30, 13);
   oled.setTextSize(2);
-  oled.print(currentLevel, 1); oled.setTextSize(1); oled.print("cm");
+  oled.print(currentLevel, 1); 
+  oled.setTextSize(1); 
+  oled.print("cm");
 
-  // 5. แถวล่าง: พิกัด GPS
-  oled.setCursor(0, 40);
+  // 5. แถวอุณหภูมิและความชื้น (แทรกกลาง)
+  oled.setCursor(0, 32);
+  oled.print("T: "); oled.print(currentTemp, 1); oled.print("C  ");
+  oled.print("H: "); oled.print(currentHum, 1); oled.print("%");
+
+  // 6. แถวล่างสุด: พิกัด GPS
+  oled.setCursor(0, 45);
   if (gps.location.isValid()) {
     oled.print("Lat:"); oled.println(gps.location.lat(), 4);
     oled.print("Lng:"); oled.println(gps.location.lng(), 4);
   } else {
     oled.print("GPS: Searching...");
-    oled.setCursor(90, 40);
+    oled.setCursor(90, 45);
     oled.print("S:"); oled.print(gps.satellites.value());
   }
   
@@ -148,34 +170,45 @@ void prepareTxFrame(uint8_t port) {
   int32_t lngInt = (int32_t)(currentLng * 1000000.0f);
   uint32_t latU = (uint32_t)latInt;
   uint32_t lngU = (uint32_t)lngInt;
-  uint16_t vBatInt = (uint16_t)(finalBatteryVoltage * 100); // 4.12V -> 412
+  uint16_t vBatInt = (uint16_t)(finalBatteryVoltage * 100); 
+  
+  // แปลงค่า SHT30 ให้เป็น Integer (คูณ 100 เพื่อเก็บทศนิยม 2 ตำแหน่ง)
+  int16_t tempInt = (int16_t)(currentTemp * 100);
+  uint16_t humInt = (uint16_t)(currentHum * 100);
 
-  // *** อัปเดตขนาด Payload เป็น 14 Bytes ***
-  appDataSize = 14; 
+  // เปลี่ยนขนาด Payload เป็น 18 Bytes
+  appDataSize = 18; 
 
-  appData[0] = (uint8_t)station_id;
-  appData[1] = (levelInt >> 8) & 0xFF;
-  appData[2] = levelInt & 0xFF;
-  appData[3] = (latU >> 24) & 0xFF;
-  appData[4] = (latU >> 16) & 0xFF;
-  appData[5] = (latU >> 8) & 0xFF;
-  appData[6] = latU & 0xFF;
+  appData[0]  = (uint8_t)station_id;
+  appData[1]  = (levelInt >> 8) & 0xFF;
+  appData[2]  = levelInt & 0xFF;
+  appData[3]  = (latU >> 24) & 0xFF;
+  appData[4]  = (latU >> 16) & 0xFF;
+  appData[5]  = (latU >> 8) & 0xFF;
+  appData[6]  = latU & 0xFF;
   appData[7]  = (lngU >> 24) & 0xFF;
   appData[8]  = (lngU >> 16) & 0xFF;
   appData[9]  = (lngU >> 8) & 0xFF;
   appData[10] = lngU & 0xFF;
   
-  // *** ส่ง finalBatteryVoltage และ Bat ***
   appData[11] = (vBatInt >> 8) & 0xFF;
   appData[12] = vBatInt & 0xFF;
   appData[13] = (uint8_t)batPercentage;
+
+  // เพิ่มข้อมูล SHT30 ลงใน Payload
+  appData[14] = (tempInt >> 8) & 0xFF;
+  appData[15] = tempInt & 0xFF;
+  appData[16] = (humInt >> 8) & 0xFF;
+  appData[17] = humInt & 0xFF;
 }
 
 void readSensorsQuick() {
-    // --- 1. อ่าน GPS (UART Toggle) ---
-    Serial1.begin(9600, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN); 
+    // --- 1. อ่าน GPS ---
+    while (Serial1.available()) {
+        Serial1.read();
+    }
     unsigned long startWait = millis();
-    while (millis() - startWait < 1500) { 
+    while (millis() - startWait < 2000) { 
         while (Serial1.available()) {
             gps.encode(Serial1.read());
         }
@@ -183,14 +216,9 @@ void readSensorsQuick() {
     if (gps.location.isValid()) {
         currentLat = gps.location.lat();
         currentLng = gps.location.lng();
-        Serial.print("GPS Fix: ");
-    } else {
-        Serial.print("GPS No Fix: ");
     }
-    Serial1.end(); 
-    Serial.print(currentLat, 6); Serial.print(", "); Serial.println(currentLng, 6);
 
-    // --- 2. อ่านแบตเตอรี่ผ่าน ADC (Median + EMA Filter) ---
+    // --- 2. อ่านแบตเตอรี่ผ่าน ADC ---
     int samples[31];
     for (int i = 0; i < 31; i++) {
       samples[i] = analogReadMilliVolts(CUSTOM_BAT_PIN);
@@ -206,41 +234,48 @@ void readSensorsQuick() {
       }
     }
     long sum = 0;
-    for (int i = 10; i <= 20; i++) {
-      sum += samples[i];
-    }
+    for (int i = 10; i <= 20; i++) sum += samples[i];
     float medianAvgMv = sum / 11.0;
-    float currentAvgVoltage = (medianAvgMv / 1000.0) * 6.615;
+    float currentAvgVoltage = (medianAvgMv / 1000.0) * 5.96;
     
-    if (smoothedVoltage == 0.0) {
-      smoothedVoltage = currentAvgVoltage; 
-    } else {
-      smoothedVoltage = (currentAvgVoltage * 0.1) + (smoothedVoltage * 0.9);
-    }
+    if (smoothedVoltage == 0.0) smoothedVoltage = currentAvgVoltage; 
+    else smoothedVoltage = (currentAvgVoltage * 0.1) + (smoothedVoltage * 0.9);
     
     finalBatteryVoltage = smoothedVoltage + calibrationOffset;
-    batPercentage = map((int)(finalBatteryVoltage * 100), 250, 370, 0, 100);
+    batPercentage = map((int)(finalBatteryVoltage * 100), 330, 420, 0, 100);
     if (batPercentage > 100) batPercentage = 100;
     if (batPercentage < 0) batPercentage = 0;
 
-    Serial.printf("Bat: %.2fV | %d%%\n", finalBatteryVoltage, batPercentage);
-
-    // --- 3. อ่านค่าระดับน้ำ (ปัจจุบันใช้ Dummy) ---
-    /* // หากต้องการใช้เซนเซอร์ RS485 จริง ให้ลบ /* และ */
-    uint8_t result = node.readHoldingRegisters(0x0004, 1);
-    if (result == node.ku8MBSuccess) {
-      currentLevel = node.getResponseBuffer(0) / 10.0; 
-    } else {
-       Serial.println("Sensor Read Error");
+    // --- 3. อ่านค่าระดับน้ำ (RS485 Modbus) ---
+    while(Serial2.available()) Serial2.read(); 
+    bool rs485Success = false;
+    for(int r = 0; r < 3; r++) { 
+        uint8_t result = node.readHoldingRegisters(0x0004, 1);
+        if (result == node.ku8MBSuccess) {
+            currentLevel = node.getResponseBuffer(0) / 10.0; 
+            rs485Success = true;
+            break; 
+        }
+        delay(200); 
     }
-    /*
-    currentLevel = random(100, 500) / 10.0; // บรรทัดนี้สำหรับทดสอบ
-    Serial.print("Lvl: "); Serial.println(currentLevel);
-    */
+    if(!rs485Success) {
+        Serial.println("RS485 Sensor Read Failed");
+    }
+
+    // --- 4. อ่านค่าอุณหภูมิและความชื้นจาก SHT30 ---
+    float t = sht31.readTemperature();
+    float h = sht31.readHumidity();
+    
+    // ตรวจสอบว่าค่าที่อ่านมาถูกต้องหรือไม่ (ถ้าเซนเซอร์มีปัญหาจะไม่เปลี่ยนค่าเดิม)
+    if (!isnan(t)) currentTemp = t;
+    if (!isnan(h)) currentHum = h;
 }
 
 void setup() {
   Serial.begin(115200);
+  
+  // เปิด Serial1 ของ GPS
+  Serial1.begin(9600, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN); 
   
   VextON(); 
   delay(100);
@@ -258,8 +293,16 @@ void setup() {
   pinMode(RELAY_PIN, OUTPUT);
   digitalWrite(RELAY_PIN, RELAY_ON); 
 
+  // สร้าง I2C Bus หลัก สำหรับ OLED
   Wire.begin(17, 18);
-  analogReadResolution(12); // ตั้งความละเอียด ADC
+  
+  // สร้าง I2C Bus ที่ 2 สำหรับ SHT30 (SDA=6, SCL=7)
+  I2CSHT.begin(SHT30_SDA, SHT30_SCL);
+  if (!sht31.begin(0x44)) {  // <-- ลบ &I2CSHT ออกตรงนี้แล้ว (เหลือแค่ Address)
+    Serial.println("SHT30 not found!");
+  }
+
+  analogReadResolution(12);
 
   pinMode(OLED_RESET, OUTPUT);
   digitalWrite(OLED_RESET, LOW);
@@ -286,6 +329,33 @@ void setup() {
 }
 
 void loop() {
+  // --- 1. เช็คปุ่มกด ---
+  if (digitalRead(BUTTON_PIN) == LOW) {
+    if (!isScreenOn) {
+      oled.ssd1306_command(SSD1306_DISPLAYON); 
+      isScreenOn = true;
+      
+      currentStatus = "Manual Read";
+      updateDisplay(); 
+      readSensorsQuick(); 
+      currentStatus = "Monitor...";
+    }
+    screenTimer = millis();
+    delay(200); 
+  }
+
+  // --- 2. ปิดจออัตโนมัติ 15 วินาที ---
+  if (isScreenOn && (millis() - screenTimer > SCREEN_TIMEOUT)) {
+    oled.ssd1306_command(SSD1306_DISPLAYOFF); 
+    isScreenOn = false;
+  }
+
+  // --- 3. วาดเวลานับถอยหลังใหม่ทุก 1 วิ ---
+  if (isScreenOn && (millis() - lastDisplayUpdate > 1000)) { 
+    lastDisplayUpdate = millis();
+    updateDisplay(); 
+  }
+
   switch (deviceState) {
     case DEVICE_STATE_INIT: {
       #if (LORAWAN_DEVEUI_AUTO)
@@ -306,22 +376,19 @@ void loop() {
       currentStatus = "Sending...";
       updateDisplay();
       
-      // --- เพิ่มจังหวะกระพริบ Pilot Lamp สีเขียว 3 ครั้ง ---
       for(int i=0; i<3; i++) {
-         digitalWrite(LED_GREEN_PIN, HIGH); // สั่งไฟติด (ถ้าวงจรคุณเป็น Active LOW ให้แก้เป็น LOW)
+         digitalWrite(LED_GREEN_PIN, HIGH);
          delay(150);
-         digitalWrite(LED_GREEN_PIN, LOW);  // สั่งไฟดับ (ถ้าวงจรคุณเป็น Active LOW ให้แก้เป็น HIGH)
+         digitalWrite(LED_GREEN_PIN, LOW);  
          delay(150);
       }
       
-      // เปิดไฟค้างไว้ระหว่างอ่านเซนเซอร์และส่งข้อมูล
       digitalWrite(LED_GREEN_PIN, HIGH); 
       
       readSensorsQuick(); 
       prepareTxFrame(appPort);
       LoRaWAN.send();
       
-      // หน่วงเวลาให้เห็นไฟค้างอีกนิดก่อนดับ
       delay(1000); 
       
       deviceState = DEVICE_STATE_CYCLE;
@@ -340,36 +407,7 @@ void loop() {
     }
 
     case DEVICE_STATE_SLEEP: {
-      // ให้วิทยุ LoRaWAN หลับและประมวลผลเครือข่าย
       LoRaWAN.sleep(loraWanClass); 
-      
-      // 1. กดปุ่ม PRG เพื่อเปิดจอ
-      if (digitalRead(BUTTON_PIN) == LOW) {
-        if (!isScreenOn) {
-          oled.ssd1306_command(SSD1306_DISPLAYON); 
-          isScreenOn = true;
-          
-          currentStatus = "Reading...";
-          updateDisplay(); 
-          readSensorsQuick(); 
-          currentStatus = "Monitor...";
-        }
-        screenTimer = millis();
-        delay(200); 
-      }
-
-      // 2. ปิดจออัตโนมัติ 15 วินาที
-      if (isScreenOn && (millis() - screenTimer > SCREEN_TIMEOUT)) {
-        oled.ssd1306_command(SSD1306_DISPLAYOFF); 
-        isScreenOn = false;
-      }
-
-      // 3. วาดเวลานับถอยหลังใหม่ทุก 1 วิ (เมื่อจอเปิดอยู่)
-      if (isScreenOn && (millis() - lastDisplayUpdate > 1000)) { 
-        lastDisplayUpdate = millis();
-        updateDisplay(); 
-      }
-      
       break;
     }
 
