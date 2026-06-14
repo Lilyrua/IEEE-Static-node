@@ -22,19 +22,19 @@ uint8_t nwkSKey[] = {0x59, 0x9E, 0xB8, 0xCB, 0x47, 0x49, 0xE3, 0x40, 0x73, 0x41,
 uint8_t appSKey[] = {0xF7, 0xA8, 0x8F, 0x89, 0x6C, 0x6B, 0xAA, 0xFB, 0xA5, 0xF2, 0x31, 0x96, 0xCA, 0x7D, 0x05, 0xDC};
 
 // ================= LoRaWAN Config for static 2 =================
-uint8_t devEui[] = {0x7F, 0x7D, 0x8C, 0xCF, 0x7A, 0xF2, 0x6A, 0x75};
-uint8_t appEui[] = {0x1C, 0x0A, 0x50, 0x5C, 0x96, 0x55, 0x21, 0xD7}; 
-uint8_t appKey[] = {0x20, 0xF5, 0xAE, 0x40, 0x61, 0x03, 0x4D, 0xAC, 0xC0, 0xE9, 0x91, 0x73, 0xDA, 0x5B, 0x2A, 0xAB};
+// uint8_t devEui[] = {0x7F, 0x7D, 0x8C, 0xCF, 0x7A, 0xF2, 0x6A, 0x75};
+// uint8_t appEui[] = {0x1C, 0x0A, 0x50, 0x5C, 0x96, 0x55, 0x21, 0xD7}; 
+// uint8_t appKey[] = {0x20, 0xF5, 0xAE, 0x40, 0x61, 0x03, 0x4D, 0xAC, 0xC0, 0xE9, 0x91, 0x73, 0xDA, 0x5B, 0x2A, 0xAB};
 
-uint8_t nwkSKey[] = {0x59, 0x9E, 0xB8, 0xCB, 0x47, 0x49, 0xE3, 0x40, 0x73, 0x41, 0x9C, 0x77, 0x53, 0x7B, 0x13, 0x1F};
-uint8_t appSKey[] = {0xF7, 0xA8, 0x8F, 0x89, 0x6C, 0x6B, 0xAA, 0xFB, 0xA5, 0xF2, 0x31, 0x96, 0xCA, 0x7D, 0x05, 0xDC};
+// uint8_t nwkSKey[] = {0x59, 0x9E, 0xB8, 0xCB, 0x47, 0x49, 0xE3, 0x40, 0x73, 0x41, 0x9C, 0x77, 0x53, 0x7B, 0x13, 0x1F};
+// uint8_t appSKey[] = {0xF7, 0xA8, 0x8F, 0x89, 0x6C, 0x6B, 0xAA, 0xFB, 0xA5, 0xF2, 0x31, 0x96, 0xCA, 0x7D, 0x05, 0xDC};
 
 uint32_t devAddr = (uint32_t)0x01a88516; 
 
 uint16_t userChannelsMask[6] = {0x00FF, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000};
 LoRaMacRegion_t loraWanRegion = ACTIVE_REGION;
 DeviceClass_t loraWanClass = CLASS_A;
-uint32_t appTxDutyCycle = 30000; // แก้เป็น 300,000 ms (5 นาที)
+uint32_t appTxDutyCycle = 30000; // รอบส่ง 5 นาที
 
 bool overTheAirActivation = true;
 bool loraWanAdr = true;
@@ -45,15 +45,15 @@ uint8_t confirmedNbTrials = 4;
 // ================= ตัวแปรสำหรับจับเวลา =================
 unsigned long lastSendTime = 0;
 uint32_t currentTxWait = 30000;
-unsigned long lastBtnTime = 0; // จับเวลาปุ่มกด (Debounce)
+unsigned long lastBtnTime = 0; 
 
 // ================= Hardware Config =================
 #define RELAY_PIN 26
 #define RELAY_ON  HIGH    
 #define RELAY_OFF LOW   
 
-#define LED_RED_PIN 5     // LED สีแดง (พร้อมทำงาน)
-#define LED_GREEN_PIN 4   // LED สีเขียว (กำลังส่งข้อมูล)
+#define LED_RED_PIN 5     
+#define LED_GREEN_PIN 4   
 
 // หน้าจอ OLED และปุ่มกด
 #define SCREEN_WIDTH 128
@@ -72,7 +72,7 @@ const unsigned long SCREEN_TIMEOUT = 15000;
 #define RS485_TX 47
 #define GPS_RX_PIN 19 
 #define GPS_TX_PIN 20
-#define CUSTOM_BAT_PIN 2  // ขาอ่านแบตเตอรี่
+#define CUSTOM_BAT_PIN 2  
 
 // SHT30 I2C Config
 #define SHT30_SDA 6
@@ -93,8 +93,8 @@ float smoothedVoltage = 0.0;
 float calibrationOffset = 0; 
 
 // ตัวแปรเก็บค่า SHT30
-float currentTemp = 0.0;
-float currentHum = 0.0;
+float currentTemp = NAN; // เปลี่ยนค่าเริ่มต้นเป็น NAN
+float currentHum = NAN;
 
 String currentStatus = "Booting..."; 
 int station_id = 1;
@@ -111,22 +111,19 @@ void updateDisplay() {
   oled.clearDisplay();
   oled.setTextColor(SSD1306_WHITE);
   
-  // 1. แถวบนสุด: โหมดการทำงาน
   oled.setTextSize(1);
   oled.setCursor(0, 0);
   oled.print(currentStatus);
 
-  // 2. แถวบนสุด (ตรงกลาง): โชว์แบตเตอรี่และเปอร์เซ็นต์
   oled.setCursor(45, 0);
   oled.print(finalBatteryVoltage, 2); 
   oled.print("V ");
   oled.print(batPercentage);
   oled.print("%");
 
-  // 3. แถวบนสุด (ขวา): เวลานับถอยหลัง
   oled.setCursor(95, 0); 
   if (deviceState == DEVICE_STATE_SLEEP) {
-    oled.print("Sleep"); // ถ้าบอร์ดหลับอยู่ ไม่ต้องโชว์เวลานับถอยหลัง (เพราะเวลาในชิปจะหยุด)
+    oled.print("Sleep"); 
   } else if (lastSendTime > 0) {
     unsigned long elapsed = millis() - lastSendTime;
     unsigned long remain = (currentTxWait > elapsed) ? (currentTxWait - elapsed) / 1000 : 0;
@@ -141,7 +138,6 @@ void updateDisplay() {
 
   oled.drawLine(0, 10, 128, 10, SSD1306_WHITE);
 
-  // 4. แถวระดับน้ำ
   oled.setCursor(0, 13);
   oled.print("Lvl:");
   oled.setCursor(30, 13);
@@ -150,12 +146,15 @@ void updateDisplay() {
   oled.setTextSize(1); 
   oled.print("cm");
 
-  // 5. แถวอุณหภูมิและความชื้น
+  // แถวอุณหภูมิและความชื้น (เพิ่มเช็คค่าก่อนแสดงผล)
   oled.setCursor(0, 32);
-  oled.print("T: "); oled.print(currentTemp, 1); oled.print("C  ");
-  oled.print("H: "); oled.print(currentHum, 1); oled.print("%");
+  if (!isnan(currentTemp) && !isnan(currentHum)) {
+      oled.print("T: "); oled.print(currentTemp, 1); oled.print("C  ");
+      oled.print("H: "); oled.print(currentHum, 1); oled.print("%");
+  } else {
+      oled.print("T: ---C  H: ---%");
+  }
 
-  // 6. แถวล่างสุด: พิกัด GPS
   oled.setCursor(0, 45);
   if (gps.location.isValid()) {
     oled.print("Lat:"); oled.println(gps.location.lat(), 4);
@@ -177,8 +176,9 @@ void prepareTxFrame(uint8_t port) {
   uint32_t lngU = (uint32_t)lngInt;
   uint16_t vBatInt = (uint16_t)(finalBatteryVoltage * 100); 
   
-  int16_t tempInt = (int16_t)(currentTemp * 100);
-  uint16_t humInt = (uint16_t)(currentHum * 100);
+  // ป้องกันค่าขยะส่งเข้า LoRa หากอ่านเซนเซอร์ไม่ได้
+  int16_t tempInt = isnan(currentTemp) ? 0 : (int16_t)(currentTemp * 100);
+  uint16_t humInt = isnan(currentHum) ? 0 : (uint16_t)(currentHum * 100);
 
   appDataSize = 18; 
   appData[0]  = (uint8_t)station_id;
@@ -202,13 +202,13 @@ void prepareTxFrame(uint8_t port) {
 }
 
 void readSensorsQuick() {
-    // --- 1. อ่าน GPS (ดึงค่าล่าสุด ไม่บล็อกโค้ดแล้ว) ---
+    // --- 1. อ่าน GPS ---
     if (gps.location.isValid()) {
         currentLat = gps.location.lat();
         currentLng = gps.location.lng();
     }
 
-    // --- 2. อ่านแบตเตอรี่ผ่าน ADC ---
+    // --- 2. อ่านแบตเตอรี่ ---
     int samples[31];
     for (int i = 0; i < 31; i++) {
       samples[i] = analogReadMilliVolts(CUSTOM_BAT_PIN);
@@ -235,10 +235,10 @@ void readSensorsQuick() {
     batPercentage = map((int)(finalBatteryVoltage * 100), 330, 420, 0, 100);
     batPercentage = constrain(batPercentage, 0, 100);
 
-    // --- 3. อ่านค่าระดับน้ำ (RS485 Modbus) ---
+    // --- 3. อ่านค่าระดับน้ำ (RS485) ---
     int clearCount = 0;
     while(Serial2.available() && clearCount < 100) { 
-        Serial2.read(); // เคลียร์ขยะแบบมี Limit ป้องกันลูปค้าง
+        Serial2.read(); 
         clearCount++;
     }
     
@@ -254,20 +254,17 @@ void readSensorsQuick() {
     }
     if(!rs485Success) Serial.println("RS485 Read Failed");
 
-    // --- 4. อ่าน SHT30 (ครั้งเดียวชัวร์ๆ ไม่มีลูป 30 วิ) ---
-    I2CSHT.beginTransmission(0x44);
-    I2CSHT.endTransmission();
-    delay(50); // ให้เวลาเซนเซอร์เคลียร์ I2C Bus
-
+    // --- 4. อ่าน SHT30 (แก้ไขให้ถูกต้องแล้ว) ---
     float t = sht31.readTemperature();
     float h = sht31.readHumidity();
     
-    // ตรวจสอบว่าไม่เป็น NaN และไม่ใช่ Error 0x00 (-45)
-    if (!isnan(t) && !isnan(h) && t > -40.0) { 
+    // ตรวจสอบความถูกต้องของข้อมูลจาก Library ทันที
+    if (!isnan(t) && !isnan(h) && t > -40.0 && t < 125.0) { 
         currentTemp = t;
         currentHum = h;
+        Serial.printf("SHT30 Read OK: %.1f C | %.1f %%\n", currentTemp, currentHum);
     } else {
-        Serial.println("SHT30 I2C Collision or Error");
+        Serial.println("SHT30 Read Error: No Signal or I2C Collision");
     }
 }
 
@@ -293,8 +290,13 @@ void setup() {
 
   Wire.begin(17, 18);
   I2CSHT.begin(SHT30_SDA, SHT30_SCL);
+  
+  delay(50); // เพิ่ม Delay ให้ SHT30 พร้อมทำงานบนบัส I2C
+
   if (!sht31.begin(0x44)) { 
     Serial.println("SHT30 not found!");
+  } else {
+    Serial.println("SHT30 Ready!");
   }
 
   analogReadResolution(12);
@@ -324,12 +326,10 @@ void setup() {
 }
 
 void loop() {
-  // --- 1. Background Task: แอบอ่าน GPS ตลอดเวลาที่ลูปวิ่ง (ไม่บล็อกระบบ) ---
   while (Serial1.available() > 0) {
       gps.encode(Serial1.read());
   }
 
-  // --- 2. เช็คปุ่มกดแบบลดการกวน (Debounce ผ่าน millis) ---
   if (digitalRead(BUTTON_PIN) == LOW) {
     if (millis() - lastBtnTime > 500) { 
       lastBtnTime = millis();
@@ -346,19 +346,16 @@ void loop() {
     }
   }
 
-  // --- 3. ปิดจออัตโนมัติ 15 วินาที ---
   if (isScreenOn && (millis() - screenTimer > SCREEN_TIMEOUT)) {
     oled.ssd1306_command(SSD1306_DISPLAYOFF); 
     isScreenOn = false;
   }
 
-  // --- 4. อัปเดตจอทุก 1 วิ (ทำเฉพาะตอนจอเปิด และไม่ได้อยู่ในโหมด Sleep) ---
   if (isScreenOn && (millis() - lastDisplayUpdate > 1000) && deviceState != DEVICE_STATE_SLEEP) { 
     lastDisplayUpdate = millis();
     updateDisplay(); 
   }
 
-  // --- 5. LoRaWAN State Machine ---
   switch (deviceState) {
     case DEVICE_STATE_INIT: {
       #if (LORAWAN_DEVEUI_AUTO)
@@ -402,7 +399,7 @@ void loop() {
       txDutyCycleTime = currentTxWait;
       
       lastSendTime = millis(); 
-      currentStatus = "Sleeping..."; // แจ้งเตือนก่อนหลับ
+      currentStatus = "Sleep"; 
       updateDisplay();
 
       LoRaWAN.cycle(txDutyCycleTime);
