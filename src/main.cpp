@@ -1,3 +1,5 @@
+// VERSION CODE : SHT latest Edit with v1 (14-06-2024 )
+
 /* * HELTEC V3 LoRaWAN - MASTER DEPLOYMENT MODE (BEST PRACTICE)
  * - รองรับ SHT30 (I2C: SDA=6, SCL=7) แบบ Non-Blocking
  * - รองรับ GPS แบบ Background (ไม่บล็อกระบบ)
