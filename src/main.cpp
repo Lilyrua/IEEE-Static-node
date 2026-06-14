@@ -1,6 +1,8 @@
-/* * HELTEC V3 LoRaWAN - MASTER DEPLOYMENT MODE (BEST PRACTICE)
- * - รองรับ SHT30 (I2C: SDA=6, SCL=7) แบบ Non-Blocking
- * - รองรับ GPS แบบ Background (ไม่บล็อกระบบ)
+// test version 
+
+/* * HELTEC V3 LoRaWAN - MASTER DEPLOYMENT MODE (FINAL VERSION)
+ * - รองรับ SHT30 พร้อมระบบ Wake-up & Dummy Read (แก้บั๊ก -45 องศา)
+ * - รองรับ GPS แบบ Background
  * - รอบส่ง 5 นาที (300,000 ms) 
  */
 
@@ -14,20 +16,20 @@
 #include <Adafruit_SHT31.h> 
 
 // ================= LoRaWAN Config for static 1 =================
-uint8_t devEui[] = {0x63, 0x0C, 0x36, 0x21, 0x13, 0x33, 0x95, 0xC4};
-uint8_t appEui[] = {0xD3, 0x93, 0xB6, 0xD3, 0xEE, 0xF5, 0xAE, 0xF1}; 
-uint8_t appKey[] = {0x9B, 0xC4, 0x8B, 0x94, 0x1C, 0x48, 0x75, 0x5B, 0xA6, 0xEA, 0x79, 0xD1, 0xFA, 0xB8, 0x53, 0xEF};
-
-uint8_t nwkSKey[] = {0x59, 0x9E, 0xB8, 0xCB, 0x47, 0x49, 0xE3, 0x40, 0x73, 0x41, 0x9C, 0x77, 0x53, 0x7B, 0x13, 0x1F};
-uint8_t appSKey[] = {0xF7, 0xA8, 0x8F, 0x89, 0x6C, 0x6B, 0xAA, 0xFB, 0xA5, 0xF2, 0x31, 0x96, 0xCA, 0x7D, 0x05, 0xDC};
-
-// ================= LoRaWAN Config for static 2 =================
-// uint8_t devEui[] = {0x7F, 0x7D, 0x8C, 0xCF, 0x7A, 0xF2, 0x6A, 0x75};
-// uint8_t appEui[] = {0x1C, 0x0A, 0x50, 0x5C, 0x96, 0x55, 0x21, 0xD7}; 
-// uint8_t appKey[] = {0x20, 0xF5, 0xAE, 0x40, 0x61, 0x03, 0x4D, 0xAC, 0xC0, 0xE9, 0x91, 0x73, 0xDA, 0x5B, 0x2A, 0xAB};
+// uint8_t devEui[] = {0x63, 0x0C, 0x36, 0x21, 0x13, 0x33, 0x95, 0xC4};
+// uint8_t appEui[] = {0xD3, 0x93, 0xB6, 0xD3, 0xEE, 0xF5, 0xAE, 0xF1}; 
+// uint8_t appKey[] = {0x9B, 0xC4, 0x8B, 0x94, 0x1C, 0x48, 0x75, 0x5B, 0xA6, 0xEA, 0x79, 0xD1, 0xFA, 0xB8, 0x53, 0xEF};
 
 // uint8_t nwkSKey[] = {0x59, 0x9E, 0xB8, 0xCB, 0x47, 0x49, 0xE3, 0x40, 0x73, 0x41, 0x9C, 0x77, 0x53, 0x7B, 0x13, 0x1F};
 // uint8_t appSKey[] = {0xF7, 0xA8, 0x8F, 0x89, 0x6C, 0x6B, 0xAA, 0xFB, 0xA5, 0xF2, 0x31, 0x96, 0xCA, 0x7D, 0x05, 0xDC};
+
+// ================= LoRaWAN Config for static 2 =================
+uint8_t devEui[] = {0x7F, 0x7D, 0x8C, 0xCF, 0x7A, 0xF2, 0x6A, 0x75};
+uint8_t appEui[] = {0x1C, 0x0A, 0x50, 0x5C, 0x96, 0x55, 0x21, 0xD7}; 
+uint8_t appKey[] = {0x20, 0xF5, 0xAE, 0x40, 0x61, 0x03, 0x4D, 0xAC, 0xC0, 0xE9, 0x91, 0x73, 0xDA, 0x5B, 0x2A, 0xAB};
+
+uint8_t nwkSKey[] = {0x59, 0x9E, 0xB8, 0xCB, 0x47, 0x49, 0xE3, 0x40, 0x73, 0x41, 0x9C, 0x77, 0x53, 0x7B, 0x13, 0x1F};
+uint8_t appSKey[] = {0xF7, 0xA8, 0x8F, 0x89, 0x6C, 0x6B, 0xAA, 0xFB, 0xA5, 0xF2, 0x31, 0x96, 0xCA, 0x7D, 0x05, 0xDC};
 
 uint32_t devAddr = (uint32_t)0x01a88516; 
 
@@ -93,7 +95,7 @@ float smoothedVoltage = 0.0;
 float calibrationOffset = 0; 
 
 // ตัวแปรเก็บค่า SHT30
-float currentTemp = NAN; // เปลี่ยนค่าเริ่มต้นเป็น NAN
+float currentTemp = NAN; 
 float currentHum = NAN;
 
 String currentStatus = "Booting..."; 
@@ -127,10 +129,8 @@ void updateDisplay() {
   } else if (lastSendTime > 0) {
     unsigned long elapsed = millis() - lastSendTime;
     unsigned long remain = (currentTxWait > elapsed) ? (currentTxWait - elapsed) / 1000 : 0;
-    int m = remain / 60;
-    int s = remain % 60;
     char timeStr[16];
-    sprintf(timeStr, "%02d:%02d", m, s); 
+    sprintf(timeStr, "%02d:%02d", (int)(remain / 60), (int)(remain % 60)); 
     oled.print(timeStr);
   } else {
     oled.print("Wait");
@@ -146,7 +146,6 @@ void updateDisplay() {
   oled.setTextSize(1); 
   oled.print("cm");
 
-  // แถวอุณหภูมิและความชื้น (เพิ่มเช็คค่าก่อนแสดงผล)
   oled.setCursor(0, 32);
   if (!isnan(currentTemp) && !isnan(currentHum)) {
       oled.print("T: "); oled.print(currentTemp, 1); oled.print("C  ");
@@ -176,7 +175,6 @@ void prepareTxFrame(uint8_t port) {
   uint32_t lngU = (uint32_t)lngInt;
   uint16_t vBatInt = (uint16_t)(finalBatteryVoltage * 100); 
   
-  // ป้องกันค่าขยะส่งเข้า LoRa หากอ่านเซนเซอร์ไม่ได้
   int16_t tempInt = isnan(currentTemp) ? 0 : (int16_t)(currentTemp * 100);
   uint16_t humInt = isnan(currentHum) ? 0 : (uint16_t)(currentHum * 100);
 
@@ -254,17 +252,21 @@ void readSensorsQuick() {
     }
     if(!rs485Success) Serial.println("RS485 Read Failed");
 
-    // --- 4. อ่าน SHT30 (แก้ไขให้ถูกต้องแล้ว) ---
-    float t = sht31.readTemperature();
+    // --- 4. อ่าน SHT30 (แก้บั๊ก -45 ด้วย Dummy Read) ---
+    sht31.readTemperature(); // อ่านทิ้ง 1 รอบเพื่อกระตุ้น
+    delay(50); // รอเซนเซอร์ทำงาน
+
+    float t = sht31.readTemperature(); // อ่านค่าจริง
     float h = sht31.readHumidity();
     
-    // ตรวจสอบความถูกต้องของข้อมูลจาก Library ทันที
     if (!isnan(t) && !isnan(h) && t > -40.0 && t < 125.0) { 
         currentTemp = t;
         currentHum = h;
         Serial.printf("SHT30 Read OK: %.1f C | %.1f %%\n", currentTemp, currentHum);
     } else {
-        Serial.println("SHT30 Read Error: No Signal or I2C Collision");
+        currentTemp = NAN;
+        currentHum = NAN;
+        Serial.println("SHT30 Read Error!");
     }
 }
 
@@ -289,9 +291,9 @@ void setup() {
   digitalWrite(RELAY_PIN, RELAY_ON); 
 
   Wire.begin(17, 18);
-  I2CSHT.begin(SHT30_SDA, SHT30_SCL);
   
-  delay(50); // เพิ่ม Delay ให้ SHT30 พร้อมทำงานบนบัส I2C
+  I2CSHT.begin(SHT30_SDA, SHT30_SCL);
+  delay(50); 
 
   if (!sht31.begin(0x44)) { 
     Serial.println("SHT30 not found!");
@@ -339,7 +341,12 @@ void loop() {
         
         currentStatus = "Manual Read";
         updateDisplay(); 
+        
+        // กระตุ้น I2C ก่อนอ่านแบบ Manual
+        I2CSHT.begin(SHT30_SDA, SHT30_SCL);
+        sht31.begin(0x44);
         readSensorsQuick(); 
+        
         currentStatus = "Monitor...";
       }
       screenTimer = millis();
@@ -373,8 +380,13 @@ void loop() {
     }
 
     case DEVICE_STATE_SEND: {
-      currentStatus = "Sending...";
+      currentStatus = "Warmup...";
       updateDisplay();
+      
+      // 1. กระตุ้น I2C Bus และ Sensor หลังจากตื่นจาก Sleep
+      I2CSHT.begin(SHT30_SDA, SHT30_SCL);
+      sht31.begin(0x44);
+      delay(50);
       
       for(int i=0; i<3; i++) {
          digitalWrite(LED_GREEN_PIN, HIGH);
@@ -384,7 +396,15 @@ void loop() {
       }
       digitalWrite(LED_GREEN_PIN, HIGH); 
       
+      // 2. อ่าน 2 รอบ (วอร์มอัพ -> พัก -> อ่านจริง)
       readSensorsQuick(); 
+      delay(500);         
+      
+      currentStatus = "Sending...";
+      updateDisplay();
+      
+      readSensorsQuick(); 
+      
       prepareTxFrame(appPort);
       LoRaWAN.send();
       
