@@ -1,3 +1,5 @@
+// Version [Pressure Sensor, GPS, Battery, SHT31] LTS Comfirm by Tus (14/06/69)
+
 /* * HELTEC V3 LoRaWAN - MASTER DEPLOYMENT MODE (FINAL VERSION)
  * - รองรับ SHT30 พร้อมระบบ Wake-up & Dummy Read (แก้บั๊ก -45 องศา)
  * - รองรับ GPS แบบ Background
