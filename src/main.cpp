@@ -1,7 +1,5 @@
-// testlatest
-
-/* * HELTEC V3 LoRaWAN - MASTER DEPLOYMENT MODE (BEST PRACTICE)
- * - รองรับ SHT30 พร้อมระบบ Wake-up & Warm-up หลังตื่นจาก Sleep
+/* * HELTEC V3 LoRaWAN - MASTER DEPLOYMENT MODE (FINAL VERSION)
+ * - รองรับ SHT30 พร้อมระบบ Wake-up & Dummy Read (แก้บั๊ก -45 องศา)
  * - รองรับ GPS แบบ Background
  * - รอบส่ง 5 นาที (300,000 ms) 
  */
@@ -252,8 +250,11 @@ void readSensorsQuick() {
     }
     if(!rs485Success) Serial.println("RS485 Read Failed");
 
-    // --- 4. อ่าน SHT30 ---
-    float t = sht31.readTemperature();
+    // --- 4. อ่าน SHT30 (แก้บั๊ก -45 ด้วย Dummy Read) ---
+    sht31.readTemperature(); // อ่านทิ้ง 1 รอบเพื่อกระตุ้น
+    delay(50); // รอเซนเซอร์ทำงาน
+
+    float t = sht31.readTemperature(); // อ่านค่าจริง
     float h = sht31.readHumidity();
     
     if (!isnan(t) && !isnan(h) && t > -40.0 && t < 125.0) { 
@@ -393,14 +394,14 @@ void loop() {
       }
       digitalWrite(LED_GREEN_PIN, HIGH); 
       
-      // 2. ควรอ่าน 2 รอบ (เหมือนใน Code 2)
-      readSensorsQuick(); // รอบแรก วอร์มอัพเซนเซอร์
-      delay(500);         // รอให้ข้อมูลนิ่ง
+      // 2. อ่าน 2 รอบ (วอร์มอัพ -> พัก -> อ่านจริง)
+      readSensorsQuick(); 
+      delay(500);         
       
       currentStatus = "Sending...";
       updateDisplay();
       
-      readSensorsQuick(); // รอบสอง เอาค่าไปใช้จริง
+      readSensorsQuick(); 
       
       prepareTxFrame(appPort);
       LoRaWAN.send();
