@@ -39,7 +39,7 @@ DeviceClass_t loraWanClass = CLASS_A;
 uint32_t appTxDutyCycle = 300000; // รอบส่ง 5 นาที
 
 bool overTheAirActivation = true;
-bool loraWanAdr = true;
+bool loraWanAdr = false;
 bool isTxConfirmed = false;
 uint8_t appPort = 2;
 uint8_t confirmedNbTrials = 4;
@@ -415,7 +415,7 @@ void loop() {
 
     case DEVICE_STATE_CYCLE: {
       digitalWrite(LED_GREEN_PIN, LOW); 
-      currentTxWait = appTxDutyCycle + randr(-APP_TX_DUTYCYCLE_RND, APP_TX_DUTYCYCLE_RND);
+      currentTxWait = appTxDutyCycle;
       txDutyCycleTime = currentTxWait;
       
       lastSendTime = millis(); 
