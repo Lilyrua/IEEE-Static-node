@@ -113,17 +113,30 @@ void updateDisplay() {
   oled.clearDisplay();
   oled.setTextColor(SSD1306_WHITE);
   
+  // ================= แถวที่ 1 (บนสุด) =================
   oled.setTextSize(1);
+  
+  // 1. คอลัมน์ซ้าย: สถานะการทำงาน (พิกัด X=0)
   oled.setCursor(0, 0);
-  oled.print(currentStatus);
+  // ดักแปลงข้อความให้สั้นลงอัตโนมัติ จะได้ไม่ล้นไปชนแบตเตอรี่
+  String shortStatus = currentStatus;
+  if (shortStatus == "Sending...") shortStatus = "Send";
+  else if (shortStatus == "Joining...") shortStatus = "Join";
+  else if (shortStatus == "Warmup...") shortStatus = "Warm";
+  else if (shortStatus == "Booting...") shortStatus = "Boot";
+  else if (shortStatus == "Manual Read") shortStatus = "Read";
+  else if (shortStatus == "Monitor...") shortStatus = "Mon.";
+  oled.print(shortStatus);
 
-  oled.setCursor(45, 0);
+  // 2. คอลัมน์กลาง: แบตเตอรี่ (ขยับพิกัด X มาที่ 38)
+  oled.setCursor(38, 0);
   oled.print(finalBatteryVoltage, 2); 
   oled.print("V ");
   oled.print(batPercentage);
   oled.print("%");
 
-  oled.setCursor(95, 0); 
+  // 3. คอลัมน์ขวา: เวลา / สถานะ Sleep (ขยับพิกัด X มาที่ 96)
+  oled.setCursor(96, 0); 
   if (deviceState == DEVICE_STATE_SLEEP) {
     oled.print("Sleep"); 
   } else if (lastSendTime > 0) {
@@ -136,8 +149,10 @@ void updateDisplay() {
     oled.print("Wait");
   }
 
+  // เส้นคั่นแนวนอน
   oled.drawLine(0, 10, 128, 10, SSD1306_WHITE);
 
+  // ================= แถวที่ 2: ระดับน้ำ =================
   oled.setCursor(0, 13);
   oled.print("Lvl:");
   oled.setCursor(30, 13);
@@ -146,21 +161,24 @@ void updateDisplay() {
   oled.setTextSize(1); 
   oled.print("cm");
 
+  // ================= แถวที่ 3: อุณหภูมิและความชื้น =================
   oled.setCursor(0, 32);
   if (!isnan(currentTemp) && !isnan(currentHum)) {
-      oled.print("T: "); oled.print(currentTemp, 1); oled.print("C  ");
-      oled.print("H: "); oled.print(currentHum, 1); oled.print("%");
+      oled.print("T:"); oled.print(currentTemp, 1); oled.print("C  ");
+      oled.print("H:"); oled.print(currentHum, 1); oled.print("%");
   } else {
-      oled.print("T: ---C  H: ---%");
+      oled.print("T:---C  H:---%");
   }
 
+  // ================= แถวที่ 4: พิกัด GPS =================
   oled.setCursor(0, 45);
   if (gps.location.isValid()) {
     oled.print("Lat:"); oled.println(gps.location.lat(), 4);
     oled.print("Lng:"); oled.println(gps.location.lng(), 4);
   } else {
     oled.print("GPS: Searching...");
-    oled.setCursor(90, 45);
+    // ขยับจำนวนดาวเทียมหลบมาทางขวา
+    oled.setCursor(105, 45);
     oled.print("S:"); oled.print(gps.satellites.value());
   }
   
