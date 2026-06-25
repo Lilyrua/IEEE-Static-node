@@ -1,9 +1,15 @@
+// Version แค่สลับ GPS กับ code เก่า (สำรอง)
+
 // Version [Pressure Sensor, GPS, Battery, SHT31] LTS Comfirm by Tus (14/06/69)
+// + UPGRADED: OTAA/ABP Fallback, NVS FCnt Save, and 30s Active Phase Monitor
+// >>> GPS MODE: V1-STYLE (Blocking 2 วิ + เคลียร์ buffer ตอนจะอ่าน, ไม่มี background encode)
 
 /* * HELTEC V3 LoRaWAN - MASTER DEPLOYMENT MODE (FINAL VERSION)
- * - รองรับ SHT30 พร้อมระบบ Wake-up & Dummy Read (แก้บั๊ก -45 องศา)
- * - รองรับ GPS แบบ Background
+ * - รองรับ SHT30 พร้อมระบบ Wake-up & Dummy Read
+ * - รองรับ GPS แบบ Version 1 (Blocking 2 วิ ตอนจะอ่าน)
  * - รอบส่ง 5 นาที (300,000 ms) 
+ * - เสริมระบบ OTAA with ABP Fallback และจำค่า Frame Counter ลง Flash
+ * - เสริมระบบ Active Phase แสดงผลหน้าจอ 30 วินาทีก่อนเข้า Sleep
  */
 
 #include "LoRaWan_APP.h"
@@ -14,6 +20,7 @@
 #include <ModbusMaster.h>
 #include <TinyGPSPlus.h>
 #include <Adafruit_SHT31.h> 
+#include <Preferences.h>      // เพิ่มไลบรารีสำหรับบันทึกค่าลง Flash Memory
 
 // ================= LoRaWAN Config for static 1 =================
 uint8_t devEui[] = {0x63, 0x0C, 0x36, 0x21, 0x13, 0x33, 0x95, 0xC4};
@@ -31,9 +38,10 @@ uint8_t appSKey[] = {0xF7, 0xA8, 0x8F, 0x89, 0x6C, 0x6B, 0xAA, 0xFB, 0xA5, 0xF2,
 // uint8_t nwkSKey[] = {0x59, 0x9E, 0xB8, 0xCB, 0x47, 0x49, 0xE3, 0x40, 0x73, 0x41, 0x9C, 0x77, 0x53, 0x7B, 0x13, 0x1F};
 // uint8_t appSKey[] = {0xF7, 0xA8, 0x8F, 0x89, 0x6C, 0x6B, 0xAA, 0xFB, 0xA5, 0xF2, 0x31, 0x96, 0xCA, 0x7D, 0x05, 0xDC};
 
-uint32_t devAddr = (uint32_t)0x01a88516;
+uint32_t devAddr = (uint32_t)0x00f208a1;
+// uint32_t devAddr = (uint32_t)0x00734bbc;
 
-uint16_t userChannelsMask[6] = {0x00FF, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000};
+uint16_t userChannelsMask[6] = {0x0002, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000}; // บังคับ Channel 1 เหมือนโค้ด 2
 LoRaMacRegion_t loraWanRegion = ACTIVE_REGION;
 DeviceClass_t loraWanClass = CLASS_A;
 uint32_t appTxDutyCycle = 300000; // รอบส่ง 5 นาที
@@ -44,10 +52,23 @@ bool isTxConfirmed = false;
 uint8_t appPort = 2;
 uint8_t confirmedNbTrials = 4;
 
-// ================= ตัวแปรสำหรับจับเวลา =================
+// ================= OTAA/ABP Fallback Control =================
+#define OTAA_JOIN_TIMEOUT_MS  60000UL    // รอ OTAA Join นาน 60 วิ
+#define OTAA_MAX_RETRY        3          // ลอง OTAA สูงสุด 3 ครั้ง
+
+Preferences loraPrefs;
+bool     isUsingABP       = false;
+uint8_t  otaaRetryCount   = 0;
+unsigned long joinStartTime = 0;
+bool     joinTimerStarted = false;
+
+// ================= ตัวแปรสำหรับจับเวลา & Active Phase =================
 unsigned long lastSendTime = 0;
 uint32_t currentTxWait = 300000;
-unsigned long lastBtnTime = 0; 
+
+#define ACTIVE_DURATION 30000UL // หน่วงเวลาดูหน้าจอ 30 วิ
+unsigned long activeStartTime = 0;
+bool isActivePhase = false;
 
 // ================= Hardware Config =================
 #define RELAY_PIN 26
@@ -67,6 +88,7 @@ unsigned long lastBtnTime = 0;
 Adafruit_SSD1306 oled(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 bool isScreenOn = true;
 unsigned long screenTimer = 0;
+unsigned long lastDisplayUpdate = 0;
 const unsigned long SCREEN_TIMEOUT = 15000;
 
 // เซนเซอร์
@@ -100,13 +122,27 @@ float currentHum = NAN;
 
 String currentStatus = "Booting..."; 
 int station_id = 1;
-unsigned long lastDisplayUpdate = 0;
 
 void VextON() {
   pinMode(VEXT_PIN, OUTPUT);
   digitalWrite(VEXT_PIN, LOW);
 }
 
+// ================= FCnt Flash Storage =================
+uint32_t loadFCnt() {
+    loraPrefs.begin("lora_fcnt", true);
+    uint32_t val = loraPrefs.getUInt("fcnt", 0);
+    loraPrefs.end();
+    return val;
+}
+
+void saveFCnt(uint32_t fcnt) {
+    loraPrefs.begin("lora_fcnt", false);
+    loraPrefs.putUInt("fcnt", fcnt);
+    loraPrefs.end();
+}
+
+// ⭐ มี updateDisplay() แค่ตรงนี้ที่เดียวพอครับ
 void updateDisplay() {
   if (!isScreenOn) return; 
 
@@ -116,9 +152,7 @@ void updateDisplay() {
   // ================= แถวที่ 1 (บนสุด) =================
   oled.setTextSize(1);
   
-  // 1. คอลัมน์ซ้าย: สถานะการทำงาน (พิกัด X=0)
   oled.setCursor(0, 0);
-  // ดักแปลงข้อความให้สั้นลงอัตโนมัติ จะได้ไม่ล้นไปชนแบตเตอรี่
   String shortStatus = currentStatus;
   if (shortStatus == "Sending...") shortStatus = "Send";
   else if (shortStatus == "Joining...") shortStatus = "Join";
@@ -128,28 +162,25 @@ void updateDisplay() {
   else if (shortStatus == "Monitor...") shortStatus = "Mon.";
   oled.print(shortStatus);
 
-  // 2. คอลัมน์กลาง: แบตเตอรี่ (ขยับพิกัด X มาที่ 38)
   oled.setCursor(38, 0);
   oled.print(finalBatteryVoltage, 2); 
   oled.print("V ");
   oled.print(batPercentage);
   oled.print("%");
 
-  // 3. คอลัมน์ขวา: เวลา / สถานะ Sleep (ขยับพิกัด X มาที่ 96)
   oled.setCursor(96, 0); 
-  if (deviceState == DEVICE_STATE_SLEEP) {
-    oled.print("Sleep"); 
-  } else if (lastSendTime > 0) {
-    unsigned long elapsed = millis() - lastSendTime;
-    unsigned long remain = (currentTxWait > elapsed) ? (currentTxWait - elapsed) / 1000 : 0;
-    char timeStr[16];
-    sprintf(timeStr, "%02d:%02d", (int)(remain / 60), (int)(remain % 60)); 
-    oled.print(timeStr);
+  if (isActivePhase) {
+      unsigned long activeElapsed = millis() - activeStartTime;
+      unsigned long remain = (ACTIVE_DURATION > activeElapsed) ? (ACTIVE_DURATION - activeElapsed) / 1000 : 0;
+      char timeStr[8];
+      sprintf(timeStr, "%02d:%02d", (int)(remain / 60), (int)(remain % 60));
+      oled.print(timeStr);
+  } else if (deviceState == DEVICE_STATE_SLEEP) {
+      oled.print("Sleep"); 
   } else {
-    oled.print("Wait");
+      oled.print("Wait");
   }
 
-  // เส้นคั่นแนวนอน
   oled.drawLine(0, 10, 128, 10, SSD1306_WHITE);
 
   // ================= แถวที่ 2: ระดับน้ำ =================
@@ -177,12 +208,46 @@ void updateDisplay() {
     oled.print("Lng:"); oled.println(gps.location.lng(), 4);
   } else {
     oled.print("GPS: Searching...");
-    // ขยับจำนวนดาวเทียมหลบมาทางขวา
     oled.setCursor(105, 45);
     oled.print("S:"); oled.print(gps.satellites.value());
   }
   
   oled.display();
+}
+
+// ⭐ ตามด้วย switchToABP() 
+void switchToABP() {
+    isUsingABP = true;
+    overTheAirActivation = false;
+
+    loraPrefs.begin("lora_fcnt", false);
+    loraPrefs.putBool("use_abp", true);
+    loraPrefs.end();
+
+    MibRequestConfirm_t mibReq;
+    mibReq.Type = MIB_NET_ID;
+    mibReq.Param.NetID = 0;
+    LoRaMacMibSetRequestConfirm(&mibReq);
+
+    mibReq.Type = MIB_DEV_ADDR;
+    mibReq.Param.DevAddr = devAddr;
+    LoRaMacMibSetRequestConfirm(&mibReq);
+
+    mibReq.Type = MIB_NWK_SKEY;
+    mibReq.Param.NwkSKey = nwkSKey;
+    LoRaMacMibSetRequestConfirm(&mibReq);
+
+    mibReq.Type = MIB_APP_SKEY;
+    mibReq.Param.AppSKey = appSKey;
+    LoRaMacMibSetRequestConfirm(&mibReq);
+
+    mibReq.Type = MIB_NETWORK_JOINED;
+    mibReq.Param.IsNetworkJoined = true;
+    LoRaMacMibSetRequestConfirm(&mibReq);
+
+    deviceState = DEVICE_STATE_SEND;
+    currentStatus = "ABP Mode";
+    updateDisplay(); 
 }
 
 void prepareTxFrame(uint8_t port) {
@@ -218,7 +283,16 @@ void prepareTxFrame(uint8_t port) {
 }
 
 void readSensorsQuick() {
-    // --- 1. อ่าน GPS ---
+    // --- 1. อ่าน GPS (V1-STYLE: Blocking 2 วิ + เคลียร์ buffer เก่าทิ้งก่อน) ---
+    while (Serial1.available()) {
+        Serial1.read();                       // ทิ้งข้อมูลเก่าใน buffer
+    }
+    unsigned long startWait = millis();
+    while (millis() - startWait < 2000) {     // หยุดรอเก็บข้อมูลสด 2 วิ
+        while (Serial1.available()) {
+            gps.encode(Serial1.read());
+        }
+    }
     if (gps.location.isValid()) {
         currentLat = gps.location.lat();
         currentLng = gps.location.lng();
@@ -280,11 +354,9 @@ void readSensorsQuick() {
     if (!isnan(t) && !isnan(h) && t > -40.0 && t < 125.0) { 
         currentTemp = t;
         currentHum = h;
-        Serial.printf("SHT30 Read OK: %.1f C | %.1f %%\n", currentTemp, currentHum);
     } else {
         currentTemp = NAN;
         currentHum = NAN;
-        Serial.println("SHT30 Read Error!");
     }
 }
 
@@ -303,7 +375,28 @@ void setup() {
   pinMode(BUTTON_PIN, INPUT_PULLUP);
   screenTimer = millis();
 
+  // ⭐ หากต้องการเคลียร์ NVS ให้เอาคอมเมนต์ 4 บรรทัดนี้ออก แฟลช 1 รอบ แล้วใส่คอมเมนต์กลับ
+  // loraPrefs.begin("lora_fcnt", false);
+  // loraPrefs.clear();
+  // loraPrefs.end();
+  // Serial.println("[NVS] Cleared");
+
+  // โหลด Mode
+  loraPrefs.begin("lora_fcnt", true);
+  isUsingABP = loraPrefs.getBool("use_abp", false);
+  loraPrefs.end();
+
+  if (isUsingABP) overTheAirActivation = false;
+  else overTheAirActivation = true;
+
   Mcu.begin(HELTEC_BOARD, SLOW_CLK_TPYE);
+
+  // ⭐ กู้คืน Frame Counter
+  uint32_t savedFcnt = loadFCnt();
+  MibRequestConfirm_t mibReq;
+  mibReq.Type = MIB_UPLINK_COUNTER;
+  mibReq.Param.UpLinkCounter = savedFcnt;
+  LoRaMacMibSetRequestConfirm(&mibReq);
 
   pinMode(RELAY_PIN, OUTPUT);
   digitalWrite(RELAY_PIN, RELAY_ON); 
@@ -313,10 +406,10 @@ void setup() {
   I2CSHT.begin(SHT30_SDA, SHT30_SCL);
   delay(50); 
 
-  if (!sht31.begin(0x44)) { 
-    Serial.println("SHT30 not found!");
-  } else {
-    Serial.println("SHT30 Ready!");
+  if (sht31.begin(0x44)) { 
+    sht31.readTemperature(); // Dummy
+    sht31.readHumidity();
+    delay(50);
   }
 
   analogReadResolution(12);
@@ -328,7 +421,6 @@ void setup() {
   delay(10);
 
   if(!oled.begin(SSD1306_SWITCHCAPVCC, 0x3C, false, false)) { 
-     Serial.println(F("SSD1306 failed"));
      digitalWrite(LED_RED_PIN, LOW); 
      for(;;); 
   }
@@ -341,46 +433,11 @@ void setup() {
   oled.display();
   delay(1000);
   
-  Serial2.begin(9600, SERIAL_8N1, RS485_RX, RS485_TX);      
+  Serial2.begin(9600, SERIAL_8N1, RS485_RX, RS485_TX);     
   node.begin(1, Serial2);
 }
 
 void loop() {
-  while (Serial1.available() > 0) {
-      gps.encode(Serial1.read());
-  }
-
-  if (digitalRead(BUTTON_PIN) == LOW) {
-    if (millis() - lastBtnTime > 500) { 
-      lastBtnTime = millis();
-      if (!isScreenOn) {
-        oled.ssd1306_command(SSD1306_DISPLAYON); 
-        isScreenOn = true;
-        
-        currentStatus = "Manual Read";
-        updateDisplay(); 
-        
-        // กระตุ้น I2C ก่อนอ่านแบบ Manual
-        I2CSHT.begin(SHT30_SDA, SHT30_SCL);
-        sht31.begin(0x44);
-        readSensorsQuick(); 
-        
-        currentStatus = "Monitor...";
-      }
-      screenTimer = millis();
-    }
-  }
-
-  if (isScreenOn && (millis() - screenTimer > SCREEN_TIMEOUT)) {
-    oled.ssd1306_command(SSD1306_DISPLAYOFF); 
-    isScreenOn = false;
-  }
-
-  if (isScreenOn && (millis() - lastDisplayUpdate > 1000) && deviceState != DEVICE_STATE_SLEEP) { 
-    lastDisplayUpdate = millis();
-    updateDisplay(); 
-  }
-
   switch (deviceState) {
     case DEVICE_STATE_INIT: {
       #if (LORAWAN_DEVEUI_AUTO)
@@ -393,15 +450,44 @@ void loop() {
     case DEVICE_STATE_JOIN: {
       currentStatus = "Joining...";
       updateDisplay();
-      LoRaWAN.join();
+
+      if (isUsingABP) {
+          deviceState = DEVICE_STATE_SEND;
+          break;
+      }
+
+      if (!joinTimerStarted) {
+          joinStartTime = millis();
+          joinTimerStarted = true;
+          otaaRetryCount++;
+          saveFCnt(0); // รีเซ็ต FCnt เมื่อเริ่ม Join ใหม่
+          LoRaWAN.join();
+      }
+
+      if (millis() - joinStartTime >= OTAA_JOIN_TIMEOUT_MS) {
+          joinTimerStarted = false;
+          if (otaaRetryCount >= OTAA_MAX_RETRY) {
+              currentStatus = "ABP Fallback";
+              updateDisplay();
+              switchToABP();
+          }
+      }
       break;
     }
 
     case DEVICE_STATE_SEND: {
+      // เซฟค่า FCnt ก่อนส่ง
+      MibRequestConfirm_t mibReq;
+      mibReq.Type = MIB_UPLINK_COUNTER;
+      if (LoRaMacMibGetRequestConfirm(&mibReq) == LORAMAC_STATUS_OK) {
+          saveFCnt(mibReq.Param.UpLinkCounter + 1);
+      }
+
       currentStatus = "Warmup...";
+      isScreenOn = true;
+      oled.ssd1306_command(SSD1306_DISPLAYON);
       updateDisplay();
       
-      // 1. กระตุ้น I2C Bus และ Sensor หลังจากตื่นจาก Sleep
       I2CSHT.begin(SHT30_SDA, SHT30_SCL);
       sht31.begin(0x44);
       delay(50);
@@ -414,7 +500,6 @@ void loop() {
       }
       digitalWrite(LED_GREEN_PIN, HIGH); 
       
-      // 2. อ่าน 2 รอบ (วอร์มอัพ -> พัก -> อ่านจริง)
       readSensorsQuick(); 
       delay(500);         
       
@@ -437,7 +522,13 @@ void loop() {
       txDutyCycleTime = currentTxWait;
       
       lastSendTime = millis(); 
-      currentStatus = "Sleep"; 
+      activeStartTime = millis();
+      isActivePhase = true;
+      isScreenOn = true;
+      screenTimer = millis();
+      oled.ssd1306_command(SSD1306_DISPLAYON);
+      
+      currentStatus = "Monitor..."; 
       updateDisplay();
 
       LoRaWAN.cycle(txDutyCycleTime);
@@ -446,7 +537,47 @@ void loop() {
     }
 
     case DEVICE_STATE_SLEEP: {
-      LoRaWAN.sleep(loraWanClass); 
+      if (isActivePhase) {
+          if (millis() - activeStartTime >= ACTIVE_DURATION) {
+              isActivePhase = false;
+              isScreenOn = false;
+              oled.ssd1306_command(SSD1306_DISPLAYOFF);
+              currentStatus = "Sleep";
+              screenTimer = millis();
+          } else {
+              if (millis() - lastDisplayUpdate > 1000) {
+                  lastDisplayUpdate = millis();
+                  updateDisplay();
+              }
+              
+              static unsigned long lastSensorRead = 0;
+              if (millis() - lastSensorRead > 5000) {
+                  lastSensorRead = millis();
+                  readSensorsQuick();
+              }
+          }
+      } else {
+          LoRaWAN.sleep(loraWanClass); 
+      }
+
+      // ระบบปลุกด้วยปุ่ม PRG
+      if (digitalRead(BUTTON_PIN) == LOW) {
+          isScreenOn = true;
+          isActivePhase = true;
+          activeStartTime = millis();
+          screenTimer = millis();
+          oled.ssd1306_command(SSD1306_DISPLAYON);
+          currentStatus = "Monitor...";
+          
+          I2CSHT.begin(SHT30_SDA, SHT30_SCL);
+          sht31.begin(0x44);
+          delay(200);
+      }
+
+      if (isScreenOn && !isActivePhase && millis() - screenTimer > SCREEN_TIMEOUT) {
+          oled.ssd1306_command(SSD1306_DISPLAYOFF);
+          isScreenOn = false;
+      }
       break;
     }
 
