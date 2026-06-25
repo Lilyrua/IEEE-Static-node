@@ -1,12 +1,12 @@
-// Version แค่สลับ GPS กับ code เก่า (สำรอง)
+// Version Hybrid รวมข้อดี ให้ทำงานได้ (Version หลัก)
 
 // Version [Pressure Sensor, GPS, Battery, SHT31] LTS Comfirm by Tus (14/06/69)
 // + UPGRADED: OTAA/ABP Fallback, NVS FCnt Save, and 30s Active Phase Monitor
-// >>> GPS MODE: V1-STYLE (Blocking 2 วิ + เคลียร์ buffer ตอนจะอ่าน, ไม่มี background encode)
+// >>> GPS MODE: HYBRID (Background encode + เติมสด 0.8 วิ ก่อนส่ง, ไม่ล้าง buffer)
 
 /* * HELTEC V3 LoRaWAN - MASTER DEPLOYMENT MODE (FINAL VERSION)
  * - รองรับ SHT30 พร้อมระบบ Wake-up & Dummy Read
- * - รองรับ GPS แบบ Version 1 (Blocking 2 วิ ตอนจะอ่าน)
+ * - รองรับ GPS แบบ Background + เติมสดก่อนส่ง (Hybrid)
  * - รอบส่ง 5 นาที (300,000 ms) 
  * - เสริมระบบ OTAA with ABP Fallback และจำค่า Frame Counter ลง Flash
  * - เสริมระบบ Active Phase แสดงผลหน้าจอ 30 วินาทีก่อนเข้า Sleep
@@ -283,12 +283,9 @@ void prepareTxFrame(uint8_t port) {
 }
 
 void readSensorsQuick() {
-    // --- 1. อ่าน GPS (V1-STYLE: Blocking 2 วิ + เคลียร์ buffer เก่าทิ้งก่อน) ---
-    while (Serial1.available()) {
-        Serial1.read();                       // ทิ้งข้อมูลเก่าใน buffer
-    }
-    unsigned long startWait = millis();
-    while (millis() - startWait < 2000) {     // หยุดรอเก็บข้อมูลสด 2 วิ
+    // --- 1. อ่าน GPS (HYBRID: เก็บ background ไว้ + เติมสด 0.8 วิ ก่อนส่ง, ไม่ล้าง buffer) ---
+    unsigned long gpsStart = millis();
+    while (millis() - gpsStart < 800) {       // เติมสด 0.8 วิ
         while (Serial1.available()) {
             gps.encode(Serial1.read());
         }
@@ -438,6 +435,11 @@ void setup() {
 }
 
 void loop() {
+  // ✅ HYBRID: เก็บ GPS แบบ background ตลอด (ตอนตื่น) — คงไว้
+  while (Serial1.available() > 0) {
+      gps.encode(Serial1.read());
+  }
+
   switch (deviceState) {
     case DEVICE_STATE_INIT: {
       #if (LORAWAN_DEVEUI_AUTO)
